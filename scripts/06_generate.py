@@ -66,7 +66,17 @@ def main() -> None:
     missing = int((~have).sum())
     variants = variants[have]
     if args.n:
-        variants = variants.head(args.n)
+        # Truncate by whole (gene, label) groups, never by row. A plain .head() splits
+        # same-gene pairs across the cut, so variants lose their distractor partner and the
+        # distractor_same_gene arm silently shrinks -- it dropped to 8 explanations against
+        # 40 for the other arms before this.
+        keep, taken = [], 0
+        for _, grp in variants.groupby(["gene", "label"], sort=False):
+            if taken >= args.n:
+                break
+            keep.append(grp)
+            taken += len(grp)
+        variants = pd.concat(keep) if keep else variants.head(0)
     if variants.empty:
         raise SystemExit(
             f"no variants in split={args.split} have evidence pools. "

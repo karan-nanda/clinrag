@@ -376,3 +376,77 @@ different question.
 `names_donor`**, not pool them. Every generation record carries `meta.names_donor`,
 `meta.names_a_variant`, `meta.identical_to_grounded` and `meta.donor_id` for exactly this.
 Pooling would dilute the conflation signal with cases where no signal can exist.
+
+## 14. Faithfulness metric — Phase 5 implementation
+
+### Three labels, and the middle one is load-bearing
+
+`supported` / `unsupported` / `contradicted`, never collapsed to two. `unsupported` means the
+pool is silent on the claim, **not** that the claim is false — and given the corpus ceiling in
+§12, a high unsupported rate describes the evidence as much as the model. Every report says
+so at the top.
+
+### Conflation detection
+
+Each claim carries a **scope** (`variant` / `gene` / `disease` / `other`) and a **claim_type**
+mapping to the taxonomy categories. A verdict is flagged `conflation` when a **variant**-scoped
+claim is supported **only** by **gene**-level passages: technically supported by the corpus,
+while asserting variant-specific authority the evidence does not carry. This is the clinically
+significant failure and it is invisible to a plain supported/unsupported metric.
+
+Conflation requires an actually-supported claim. An unsupported claim is already counted, and
+flagging it as conflation too would double-count one failure.
+
+### Judge self-preference is a confound, not a detail
+
+An LLM judge favours text from its own family, and one generator is Claude. Every verdict
+records the judge model and sets `same_family_as_generator`. Two consequences:
+
+- Prefer a judge from a **different family** to the generator under test where budget allows.
+- The human validation sample **over-samples same-family cases** (default 30%) so the bias is
+  measured rather than assumed absent.
+
+### Guards on the judge
+
+- A verdict of `supported` citing **no passage** is downgraded to `unsupported`. An
+  unevidenced assertion of support is not support.
+- `unsupported` verdicts carry no passage ids; out-of-range indices are discarded.
+- The `LexicalVerifier` baseline cannot detect contradiction at all. That is deliberate: it
+  is the floor. If an LLM judge cannot beat token overlap against human labels, it is not
+  earning its cost.
+
+### Two decomposers, reported side by side
+
+`SentenceDecomposer` is rule-based and free; `LLMDecomposer` is the real one. Decomposition
+quality is itself a validity threat — bad splits corrupt every downstream number — so the
+human validation must cover **decomposition**, not only verification, and the headline metric
+should be reported under both decomposers to show how much it depends on that step.
+
+### Human validation (protocol §6, implemented)
+
+- Sampling is **stratified by (arm, automatic label)** so `contradicted` survives; a
+  proportional sample would contain almost none and could not measure the judge where it
+  matters most.
+- The annotation sheet **hides the automatic label by default** — showing it anchors the
+  annotator and inflates agreement into meaninglessness.
+- Reported: inter-annotator Cohen's kappa, then automatic-vs-each-annotator **and**
+  automatic-vs-consensus. Scoring only against the agreed subset would flatter the judge by
+  removing every hard case, so all three are reported.
+- Per-label precision/recall, never a single accuracy figure: a judge can be strong on
+  `supported` and useless on `contradicted`.
+
+### Statistics — enforced in code
+
+- Bootstrap resamples **variants**, not claims. Claims within an explanation share a prompt,
+  a pool and a generation; resampling claims would treat a 40-claim explanation as 40
+  observations and produce intervals far too tight.
+- Comparisons are **paired** across arms on shared variants only, and the pair count is
+  reported, because distractor arms legitimately drop variants.
+- CIs are on the **difference**. Two per-arm intervals and an overlap check is a weaker and
+  different test.
+
+### Pilot truncation must preserve pairs
+
+Truncating the variant list by row splits same-gene pairs across the cut: a `--n 40` pilot
+gave `distractor_same_gene` 8 explanations against 40 for the other arms. `scripts/06` now
+truncates by whole (gene, label) groups. Any future subsetting must do the same.
