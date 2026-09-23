@@ -1,0 +1,36 @@
+# Phase 1 — variant set construction
+clinvar:
+  url: https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/variant_summary.txt.gz
+  raw_path: data/raw/variant_summary.txt.gz
+  submissions_url: https://ftp.ncbi.nlm.nih.gov/pub/clinvar/tab_delimited/submission_summary.txt.gz
+  submissions_path: data/raw/submission_summary.txt.gz
+  assembly: GRCh38
+
+filters:
+  min_review_stars: 2        # "criteria provided, multiple submitters, no conflicts"
+  variant_types: ["single nucleotide variant"]
+  include_vus: false         # main experiment excludes VUS (no ground truth)
+  drop_somatic: true
+  require_rsid: false        # set true if retrieval keys on rsID
+  # Evidence availability is confounded with label (95% of pathogenic vs ~20% of benign
+  # variants carry a usable submitter comment). Requiring evidence on both sides removes
+  # that structural leak; it also selects better-studied variants - state as a limitation.
+  require_submitter_comment: true
+
+sampling:
+  target_n: 1000             # plan says 500-2000; generation cost is the bottleneck
+  balance: true              # equal pathogenic / benign
+  max_variants_per_gene: 5   # stop a handful of genes dominating the set (unpaired mode)
+  # Sample same-gene same-label PAIRS so every variant has a distractor_same_gene partner.
+  # Exactly 2 per (gene,label), which also caps gene domination. See clinvar.balance_paired.
+  pair_by_gene: true
+  seed: 20260922
+
+split:
+  by: gene                   # NEVER random - ClinVar ascertainment bias is gene-level
+  fractions: {train: 0.6, dev: 0.15, test: 0.25}
+  temporal_holdout_after: null   # TBD in eval protocol; e.g. "2024-01-01"
+
+paths:
+  interim: data/interim
+  processed: data/processed
