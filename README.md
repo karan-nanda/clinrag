@@ -215,5 +215,4 @@ generations per model at n=1000. Generation goes through the Batch API at 50% co
 
 ## License
 
-Not yet chosen. Until a license is added, default copyright applies and the code is not
-licensed for reuse.
+This project is licensed under the MIT License!
