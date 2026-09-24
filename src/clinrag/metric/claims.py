@@ -215,9 +215,9 @@ class LLMDecomposer:
     """
 
     def __init__(self, model: str = "claude-opus-5", effort: str = "medium"):
-        import anthropic
+        from clinrag.generation.backends import make_client
 
-        self.client = anthropic.Anthropic()
+        self.client = make_client()
         self.model = model
         self.effort = effort
         self.name = f"llm:{model}"

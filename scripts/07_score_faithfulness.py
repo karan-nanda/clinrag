@@ -131,6 +131,22 @@ def _report(path, rates, all_claims, all_verdicts, strata, args, dec_name, ver_n
             f"{s['conflation']:.3f} |"
         )
 
+    # A verifier that assigns every claim the same label has measured nothing. Reporting
+    # arm differences from it would be reporting noise around a constant.
+    labels_seen = {v.label for v in all_verdicts}
+    if len(labels_seen) == 1:
+        only = next(iter(labels_seen))
+        lines += [
+            "",
+            f"> **DEGENERATE: every claim was labelled `{only}`.** This verifier has not "
+            "measured anything, and the arm comparisons below are differences between "
+            "constants. On the pilot, no claim reached the lexical baseline's 0.50 overlap "
+            "threshold (max observed 0.471) because models paraphrase rather than copy. "
+            "Do not report these numbers. Use `--verifier llm`, or calibrate the threshold "
+            "against human labels first -- never by eye.",
+            "",
+        ]
+
     lines += ["", "## Paired comparisons vs `ungrounded`", "",
               "Bootstrap resampled over **variants**, not claims, and paired across arms.", ""]
     if "ungrounded" in arms:

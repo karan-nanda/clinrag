@@ -1,6 +1,6 @@
 # Working notes — pick up here
 
-Last worked: 2026-09-23. Phases 1, 3 and 4 are built. 66 tests pass. Nothing is committed.
+Last worked: 2026-09-23. Phases 1, 3, 4 and 5 are built; first paid pilot run. 112 tests pass.
 
 **Phase 3 closed early by decision** (see eval_protocol.md §12): automated literature
 discovery reaches only 7% of expert-cited papers and the ceiling is structural, so the dense
@@ -32,21 +32,65 @@ everything downstream. `docs/related_work.md` §1 explains why the sanitizer exi
 
 ---
 
+## Secrets — read before touching git
+
+`key.env` holds the Anthropic API key. **This repo is public.**
+
+- `.gitignore` covers `.env`, `*.env`, `.env.*`, `key.env`, `*.key`, `secrets.*`.
+- A **local pre-commit hook** (`.git/hooks/pre-commit`) blocks staging any secret-looking
+  filename and blocks staged content matching `sk-ant-…`, `ghp_…`, `AKIA…`. Verified by
+  attempting `git add -f key.env` — the commit was refused.
+- Hooks are **not** pushed with the repo. On a fresh clone the hook must be recreated, or
+  the protection is gone.
+- Audited: `key.env` is untracked, appears in no commit on any branch, and `sk-ant-` appears
+  in no committed blob anywhere.
+
+Near miss worth remembering: `.gitignore` originally had only `.env`, which does **not**
+match `key.env`. One `git add -A` would have published the key.
+
+## Pilot run — 2026-09-23 (first real generations)
+
+10 variants x 4 arms on `claude-opus-5`, effort=medium, 34 calls, 0 errors, **$1.32**.
+Outputs in `results/generations_pilot.jsonl` (gitignored).
+
+**Quality is good.** Real clinical rationales, not boilerplate. The grounded arm demonstrably
+uses the evidence — one explanation lifted "ostensibly healthy adult undergoing
+carrier/predisposition screening" straight from the ICSL submitter comment.
+
+**Cost estimate corrected.** Output is ~**1,178 tokens/call**, not the 450 originally assumed.
+Input (~1,868) was accurate. Revised: full dev split 600 calls = $23 standard / **$12 batch**;
+full study 8,000 calls x 2 models = **~$310 batch**, not $148. Budget from these numbers.
+
+**The lexical verifier is degenerate on real text — do not report its output.** No claim
+reached the 0.50 overlap threshold (max observed **0.471**) because models paraphrase rather
+than copy, so every claim scored `unsupported` in every arm. `scripts/07` now prints a
+DEGENERATE banner when a verifier assigns every claim one label. The threshold must be
+calibrated against human labels, **never by eye** — tuning it to produce a nicer number is
+fitting the metric to the desired result.
+
+**Worth noting for Phase 7:** the ungrounded arm asserted "The variant has been submitted to
+ClinVar by multiple clinical laboratories with concordant benign/likely benign assertions."
+Nothing in the prompt says that. Confident, checkable, corpus-unverifiable — exactly the
+phenomenon the metric targets.
+
 ## Next session — in this order
 
-1. **Set up API credentials** (`ant auth login`, or export `ANTHROPIC_API_KEY`). `anthropic`
-   1.8.0 is installed; nothing has ever been called.
-2. **Dry-run generation and read the prompts yourself** — this spends nothing and is the last
-   cheap moment to catch a prompt problem:
-   `python scripts/06_generate.py --split dev --dry-run`
-3. **Small paid pilot** before the full run — e.g. `--n 10 --backend claude` on dev, read the
-   outputs, confirm they look like real rationales and not list-shaped boilerplate.
+1. **Run the LLM judge on the existing pilot** — the blocker on any real signal, since the
+   lexical baseline measures nothing. 259 claims x ~2,000 input tokens each (every claim
+   carries the whole evidence pool): **~$3.55 standard, ~$1.78 batch**.
+   `python scripts/07_score_faithfulness.py --generations results/generations_pilot.jsonl --verifier llm`
+   This is the first look at whether grounded and ungrounded actually differ.
+2. **Read the judge's rationales by hand** before trusting any rate. Check especially that it
+   is not marking claims `supported` from its own genetics knowledge rather than the passages
+   — that failure would inflate the grounded arm and is the judge's most likely error mode.
+3. **Staff the second annotator.** Still unstaffed and still the largest risk in the plan: the
+   metric is the contribution and is unvalidated without two independent annotators
+   (protocol §6). The harness is ready — `validation.py`, stratified sampling, kappa,
+   per-label scores.
 4. **Full pool build**, ~1 hour rate-limited, cached per variant:
    `python scripts/04_build_evidence_pools.py --split all --k 10 --max-chars 6000 --variant-slots 1`
    Re-check `results/evidence_budget.md` — a char ratio above 1.15 is blocking.
-5. **Phase 5 — the faithfulness metric.** This is the contribution and the longest phase.
-   Structured outputs (`output_config.format`) are the right tool for claim decomposition and
-   the judge; `client.messages.parse()` validates against a schema.
+5. **Then scale generation**, batch not standard, and only after 1–3 are settled.
 
 ## Rebuild from scratch
 

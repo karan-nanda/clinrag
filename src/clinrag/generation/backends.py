@@ -32,6 +32,23 @@ HAIKU = "claude-haiku-4-5"
 MAX_TOKENS = 2000  # explanations are 4-8 sentences; this leaves generous headroom
 
 
+def make_client():
+    """Anthropic client, adding the workspace header when the key needs one.
+
+    An org-level API key is not scoped to a workspace and the API rejects it with a 400
+    unless `anthropic-workspace-id` is sent. Set ANTHROPIC_WORKSPACE_ID (a `wrkspc_...` id,
+    not a secret) to supply it, or use a workspace-scoped key and leave it unset.
+    """
+    import os
+
+    import anthropic
+
+    workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+    if workspace:
+        return anthropic.Anthropic(default_headers={"anthropic-workspace-id": workspace})
+    return anthropic.Anthropic()
+
+
 @dataclass
 class Generation:
     """One explanation plus everything needed to reproduce and audit it."""
@@ -110,9 +127,7 @@ class ClaudeGenerator:
     """
 
     def __init__(self, model: str = OPUS, effort: str = "medium", max_tokens: int = MAX_TOKENS):
-        import anthropic  # imported lazily so the package is optional for non-generation work
-
-        self.client = anthropic.Anthropic()
+        self.client = make_client()
         self.model = model
         self.effort = effort
         self.max_tokens = max_tokens
