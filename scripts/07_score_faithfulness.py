@@ -42,6 +42,8 @@ def main() -> None:
     ap.add_argument("--n-boot", type=int, default=10_000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", default="results")
+    ap.add_argument("--resume", action="store_true",
+                    help="reuse verdicts already written to out-dir and only judge the rest")
     args = ap.parse_args()
 
     gens = load_jsonl(Path(args.generations))
@@ -66,8 +68,23 @@ def main() -> None:
     if args.verifier == "llm":
         print("  NOTE: judge and generator may share a model family; see protocol §14")
 
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    verdict_path = out / "verdicts.jsonl"
+
+    # A long judged run is expensive and slow; losing it to one failure at claim 200 of 259
+    # is not acceptable. Verdicts are appended as they are produced, and --resume skips any
+    # claim already judged.
+    done: dict[str, dict] = {}
+    if args.resume and verdict_path.exists():
+        for row in load_jsonl(verdict_path):
+            if not row.get("error"):
+                done[row["claim_id"]] = row
+        print(f"resuming: {len(done)} verdicts already on disk")
+
     all_claims, all_verdicts = [], []
     strata: dict[tuple[str, str], bool] = {}
+    sink = verdict_path.open("a" if args.resume else "w", encoding="utf-8")
 
     for i, g in enumerate(gens, 1):
         vid, arm = str(g["variation_id"]), g["arm"]
@@ -79,7 +96,13 @@ def main() -> None:
         pool = pools.get(vid, [])
 
         for c in cs:
-            all_verdicts.append(verifier.verify(c, pool, g.get("model", "")))
+            if c.claim_id in done:
+                all_verdicts.append(verify_mod.Verdict(**done[c.claim_id]))
+                continue
+            v = verifier.verify(c, pool, g.get("model", ""))
+            all_verdicts.append(v)
+            sink.write(json.dumps(v.as_dict(), ensure_ascii=False) + "\n")
+            sink.flush()
         all_claims.extend(cs)
 
         meta = g.get("meta") or {}
@@ -88,10 +111,14 @@ def main() -> None:
         if i % 100 == 0 or i == len(gens):
             print(f"  [{i}/{len(gens)}] {len(all_claims)} claims")
 
-    out = Path(args.out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    sink.close()
     _write(out / "claims.jsonl", [c.as_dict() for c in all_claims])
-    _write(out / "verdicts.jsonl", [v.as_dict() for v in all_verdicts])
+
+    failed = [v for v in all_verdicts if v.error]
+    if failed:
+        print(f"\n{len(failed)}/{len(all_verdicts)} verdicts errored and are EXCLUDED "
+              f"from all rates (not counted as unsupported). Re-run with --resume to retry.")
+        print(f"  first error: {failed[0].error}")
 
     rates = aggregate.explanation_rates(all_claims, all_verdicts)
     _report(out / "faithfulness.md", rates, all_claims, all_verdicts, strata, args,

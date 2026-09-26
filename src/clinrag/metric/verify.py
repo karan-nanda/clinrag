@@ -42,6 +42,7 @@ class Verdict:
     rationale: str = ""
     conflation: bool = False
     same_family_as_generator: bool = False
+    error: str = ""      # set when the judge call failed; excluded from all rates
 
     def as_dict(self) -> dict:
         return asdict(self)

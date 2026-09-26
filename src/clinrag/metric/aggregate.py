@@ -53,7 +53,9 @@ def explanation_rates(claims: list, verdicts: list) -> list[ExplanationRates]:
     rather than dropped -- a model that says nothing checkable is a result, and silently
     omitting it would bias the rates of every arm it appears in.
     """
-    by_claim = {v.claim_id: v for v in verdicts}
+    # An errored verdict is a missing measurement, not an `unsupported` one. Counting it
+    # would inflate the unsupported rate in proportion to how flaky the run was.
+    by_claim = {v.claim_id: v for v in verdicts if not getattr(v, "error", "")}
     groups: dict[tuple[str, str, str], list] = {}
     for c in claims:
         groups.setdefault((c.variation_id, c.arm, c.model), []).append(c)

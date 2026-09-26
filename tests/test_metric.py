@@ -413,3 +413,27 @@ def test_compare_requires_overlapping_ids():
 
     with pytest.raises(ValueError, match="share no claim"):
         val.compare({"c0": "supported"}, {"c9": "supported"})
+
+
+def test_errored_verdicts_are_excluded_not_counted_as_unsupported():
+    """A failed judge call is a MISSING measurement. Counting it as `unsupported` would
+    inflate the headline rate in proportion to how flaky the run was."""
+    cs = [mk_claim("This variant is absent from gnomAD.", cid=f"c{i}") for i in range(4)]
+    vs = [
+        verify.Verdict(claim_id="c0", label="supported", supporting_doc_ids=["gene1"]),
+        verify.Verdict(claim_id="c1", label="unsupported"),
+        verify.Verdict(claim_id="c2", label="unsupported", error="APIStatusError: 529"),
+        verify.Verdict(claim_id="c3", label="unsupported", error="APIConnectionError"),
+    ]
+    r = aggregate.explanation_rates(cs, vs)[0]
+    assert r.n_claims == 4
+    # Only c0 and c1 were measured: 1 supported, 1 unsupported, out of 4 claims.
+    assert r.supported == 0.25
+    assert r.unsupported == 0.25, "the two errored claims must not be counted as unsupported"
+
+
+def test_verdict_without_error_field_still_counts():
+    """Backwards compatibility with verdicts written before the error field existed."""
+    c = mk_claim("This variant is absent from gnomAD.", cid="c0")
+    v = verify.Verdict(claim_id="c0", label="supported", supporting_doc_ids=["gene1"])
+    assert aggregate.explanation_rates([c], [v])[0].supported == 1.0
