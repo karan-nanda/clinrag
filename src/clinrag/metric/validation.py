@@ -188,6 +188,15 @@ def sample_for_annotation(
             bucket = strata[key]
             take = min(per, len(bucket))
             chosen.extend(rng.sample(bucket, take))
+            chosen_ids.update(c.claim_id for c in chosen[-take:])
+
+    # An even split across strata rounds down and leaves the sample short of `n` -- with 12
+    # strata a request for 50 returned 38. Top up from whatever is left so the requested
+    # size is actually delivered; the stratified core is already in place.
+    if len(chosen) < n:
+        leftover = [c for c in pool if c.claim_id not in chosen_ids]
+        if leftover:
+            chosen.extend(rng.sample(leftover, min(n - len(chosen), len(leftover))))
 
     rng.shuffle(chosen)
     return chosen[:n]
@@ -212,6 +221,13 @@ def write_annotation_sheet(
     by_id = {v.claim_id: v for v in (verdicts or [])}
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Group by variant so each evidence pool is read once instead of once per claim. Pools
+    # run to ~6,000 characters, so re-reading them per row would roughly double annotation
+    # time and invite fatigue errors. The cost is that claims from one explanation sit
+    # together, which can anchor slightly; the time saved is worth more, and annotators are
+    # told to judge each row independently.
+    claims_sample = sorted(claims_sample, key=lambda c: (c.variation_id, c.claim_id))
 
     with path.open("w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)

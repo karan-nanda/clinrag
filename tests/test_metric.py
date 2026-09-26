@@ -437,3 +437,21 @@ def test_verdict_without_error_field_still_counts():
     c = mk_claim("This variant is absent from gnomAD.", cid="c0")
     v = verify.Verdict(claim_id="c0", label="supported", supporting_doc_ids=["gene1"])
     assert aggregate.explanation_rates([c], [v])[0].supported == 1.0
+
+
+def test_sampling_delivers_the_requested_size():
+    """An even split across strata rounds down; a request for 50 once returned 38."""
+    from clinrag.metric import validation as val
+
+    cs, vs = [], []
+    for arm in ("grounded", "ungrounded", "distractor_same_gene", "distractor_other_gene"):
+        for label in ("supported", "unsupported", "contradicted"):
+            for i in range(30):
+                cid = f"{arm}:{label}:{i}"
+                cs.append(claims.Claim(claim_id=cid, variation_id=f"v{i}", arm=arm,
+                                       model="m", text="a claim about this variant here"))
+                vs.append(verify.Verdict(claim_id=cid, label=label))
+    for n in (50, 200):
+        got = val.sample_for_annotation(cs, vs, n=n, seed=0, oversample_same_family=0.0)
+        assert len(got) == n, f"asked for {n}, got {len(got)}"
+        assert len({c.claim_id for c in got}) == n, "sample must not repeat claims"
