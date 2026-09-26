@@ -43,6 +43,7 @@ class Verdict:
     conflation: bool = False
     same_family_as_generator: bool = False
     error: str = ""      # set when the judge call failed; excluded from all rates
+    usage: dict = field(default_factory=dict)   # token counts, so a run's cost is auditable
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -205,7 +206,13 @@ class LLMJudge:
         payload = json.loads(
             "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
         )
-        return verdict_from_payload(payload, claim, pool, self.name, generator_model)
+        v = verdict_from_payload(payload, claim, pool, self.name, generator_model)
+        u = getattr(resp, "usage", None)
+        if u is not None:
+            v.usage = {
+                k: getattr(u, k, None) for k in ("input_tokens", "output_tokens")
+            }
+        return v
 
 
 def verdict_from_payload(
