@@ -1,6 +1,7 @@
 # Working notes — pick up here
 
-Last worked: 2026-09-23. Phases 1, 3, 4 and 5 are built; first paid pilot run. 112 tests pass.
+Last worked: 2026-09-26. Phases 1, 3, 4 and 5 built and exercised end to end against real
+models. 115 tests pass. Branch `phase5-faithfulness`, pushed, in sync with origin.
 
 **Phase 3 closed early by decision** (see eval_protocol.md §12): automated literature
 discovery reaches only 7% of expert-cited papers and the ceiling is structural, so the dense
@@ -48,6 +49,41 @@ everything downstream. `docs/related_work.md` §1 explains why the sanitizer exi
 Near miss worth remembering: `.gitignore` originally had only `.env`, which does **not**
 match `key.env`. One `git add -A` would have published the key.
 
+## Where things stand (2026-09-26)
+
+- **Judged pilot complete.** 34 generations -> 259 claims -> 259 judged verdicts, 0 errors.
+  Results and caveats in `docs/pilot_results.md`. Directionally what the study predicts;
+  statistically meaningless at n=6-10 paired variants.
+- **Human validation is staffed-pending.** Calibration sheets are generated and waiting in
+  `annotation/` (gitignored). `docs/annotation_brief.md` is ready to send — it has ONE blank
+  to fill before sending: what the annotator gets (co-authorship / acknowledgement / payment).
+  Nobody has been asked yet. **This is the critical path.**
+- **Nothing beyond the pilot has been spent.** Total spend to date: ~$1.32 generation plus
+  ~$4-6 judging (the judged run predates usage capture, so it is an estimate).
+
+### Cost model — corrected twice, trust these numbers
+
+Measured from real runs, not assumed:
+
+| | standard | batch (50%) |
+|---|---|---|
+| generation, 590 calls (full dev) | $22.89 | $11.44 |
+| judging, ~4,494 claims (full dev) | $101.12 | **$50.56** |
+| **full dev total** | **$124.01** | **$62.01** |
+
+Two corrections already made here: output is ~1,178 tokens/call not the 450 first assumed,
+and an earlier "~$12 for full dev" counted **generation only** and omitted judging, which is
+the expensive half. **Judging dominates** because every claim carries the whole evidence pool
+(~2,000 input tokens each). Serial judging of the full dev split takes ~4.6 hours at the
+pilot's observed rate; use `--batch` for bulk.
+
+### Open sequencing decision
+
+Judging the full dev split costs ~$50 while the judge is **not yet human-validated**.
+Generations (~$11 batch) are reusable whatever validation shows; judging is not. The
+conservative order is: generate now, hold judging until the annotators return. Not yet
+decided.
+
 ## Pilot run — 2026-09-23 (first real generations)
 
 10 variants x 4 arms on `claude-opus-5`, effort=medium, 34 calls, 0 errors, **$1.32**.
@@ -75,22 +111,26 @@ phenomenon the metric targets.
 
 ## Next session — in this order
 
-1. **Run the LLM judge on the existing pilot** — the blocker on any real signal, since the
-   lexical baseline measures nothing. 259 claims x ~2,000 input tokens each (every claim
-   carries the whole evidence pool): **~$3.55 standard, ~$1.78 batch**.
-   `python scripts/07_score_faithfulness.py --generations results/generations_pilot.jsonl --verifier llm`
-   This is the first look at whether grounded and ungrounded actually differ.
-2. **Read the judge's rationales by hand** before trusting any rate. Check especially that it
-   is not marking claims `supported` from its own genetics knowledge rather than the passages
-   — that failure would inflate the grounded arm and is the judge's most likely error mode.
-3. **Staff the second annotator.** Still unstaffed and still the largest risk in the plan: the
-   metric is the contribution and is unvalidated without two independent annotators
-   (protocol §6). The harness is ready — `validation.py`, stratified sampling, kappa,
-   per-label scores.
-4. **Full pool build**, ~1 hour rate-limited, cached per variant:
-   `python scripts/04_build_evidence_pools.py --split all --k 10 --max-chars 6000 --variant-slots 1`
-   Re-check `results/evidence_budget.md` — a char ratio above 1.15 is blocking.
-5. **Then scale generation**, batch not standard, and only after 1–3 are settled.
+1. **Send `docs/annotation_brief.md` to two people.** Fill the compensation blank first.
+   Sheets are already generated in `annotation/`; give each annotator their own
+   `annotator_a.csv` / `annotator_b.csv` and `ANNOTATION_GUIDE.md`. **Never send `_key.csv`** —
+   it holds the automatic labels. ~1.5-2h each for the 50-claim calibration round.
+   Score on return:
+   `python scripts/08_sample_for_annotation.py --score --sheet-a annotation/annotator_a.csv --sheet-b annotation/annotator_b.csv`
+2. **Read the kappa before spending anything more.** If humans cannot agree, the construct is
+   underspecified and no judge can be validated against it — that is a result about the task
+   and it changes the paper, not something to tune away.
+3. **Generate the full dev split** (~$11 batch). Reusable regardless of validation outcome:
+   `python scripts/04_build_evidence_pools.py --split all` (if pools are missing) then
+   `python scripts/06_generate.py --split dev --backend claude --batch`
+4. **Judge the full dev split** (~$50 batch) — only after step 2 says the judge is trustworthy.
+5. **Add a second generator family.** Every pilot verdict is `same_family_as_generator=True`
+   (Opus judged Opus), so self-preference is 100% of the sample rather than the intended 30%
+   over-sample. Until generations exist from a non-Claude model, that confound cannot be
+   measured at all.
+6. **Revisit the conflation detector.** It fired on ~5 claims. With 216/259 claims unsupported
+   there is little supported material in which conflation could be detected — decide whether
+   that is a real rarity or a detector too strict to be useful.
 
 ## Rebuild from scratch
 
