@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +26,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from clinrag.generation import backends, distractors, prompts  # noqa: E402
+
+ARGS = None
 
 
 def load_pools(path: Path) -> dict[str, list[dict]]:
@@ -50,7 +53,13 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="build prompts only; never call out")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="results/generations.jsonl")
+    ap.add_argument("--submit-only", action="store_true",
+                    help="submit the batch, record its id, and exit without waiting")
+    ap.add_argument("--collect", metavar="BATCH_ID",
+                    help="collect a previously submitted batch instead of generating")
     args = ap.parse_args()
+    global ARGS
+    ARGS = args
 
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
     for a in arms:
@@ -134,7 +143,15 @@ def main() -> None:
     gen = backends.EchoGenerator() if args.backend == "echo" else backends.ClaudeGenerator(
         model=args.model, effort=args.effort
     )
-    results = _run_batch(gen, built) if args.batch else _run_serial(gen, built)
+
+    if args.collect:
+        results = _collect_batch(gen, built, args.collect)
+    elif args.batch:
+        results = _run_batch(gen, built, submit_only=args.submit_only)
+        if results is None:
+            return
+    else:
+        results = _run_serial(gen, built)
 
     backends.write_jsonl(results, args.out)
     ok = sum(1 for r in results if not r.error)
@@ -162,14 +179,38 @@ def _run_serial(gen, built) -> list:
     return out
 
 
-def _run_batch(gen, built) -> list:
+BATCH_RECORD = Path("results/batches.jsonl")
+
+
+def _run_batch(gen, built, submit_only: bool = False):
     items = [
         (backends.make_custom_id(p.variation_id, p.arm, gen.name), p.system, p.user)
         for p in built
     ]
     batch_id = gen.submit_batch(items)
-    print(f"submitted batch {batch_id} ({len(items)} requests); polling...")
+
+    # Record the id immediately. A batch can take hours; if this process dies before
+    # collecting, the work is already paid for and the id is the only way to retrieve it.
+    BATCH_RECORD.parent.mkdir(parents=True, exist_ok=True)
+    with BATCH_RECORD.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "batch_id": batch_id, "model": gen.name, "n_requests": len(items),
+            "submitted": datetime.now(timezone.utc).isoformat(),
+        }) + "\n")
+    print(f"submitted batch {batch_id} ({len(items)} requests) -> recorded in {BATCH_RECORD}")
+
+    if submit_only:
+        print("\n--submit-only: not waiting. Collect later with:")
+        print(f"  python scripts/06_generate.py --collect {batch_id} "
+              f"--split {ARGS.split} --n {ARGS.n} --backend claude --model {gen.model}")
+        return None
+
+    print("polling (a batch may take up to 24h)...")
     gen.wait(batch_id)
+    return _collect_batch(gen, built, batch_id)
+
+
+def _collect_batch(gen, built, batch_id: str) -> list:
     results = gen.collect(batch_id)
     # Batch results come back unordered; re-attach prompt metadata by (variant, arm).
     meta = {(p.variation_id, p.arm): p.meta for p in built}
